@@ -45,18 +45,18 @@ module Lumberjack::DataDog
   end
 
   class << self
-    def setup(stream = $stdout, &block)
+    def setup(stream = $stdout, options = {}, &block)
       config = Config.new
       yield(config) if block_given?
       config.validate!
 
-      new_logger(stream, config)
+      new_logger(stream, options, config)
     end
 
     private
 
-    def new_logger(stream, config)
-      logger = Lumberjack::Logger.new(json_device(stream, config))
+    def new_logger(stream, options, config)
+      logger = Lumberjack::Logger.new(json_device(stream, config), options)
 
       # Add the error to the error tag if an exception is logged as the message.
       logger.message_formatter.add(Exception, message_exception_formatter)
