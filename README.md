@@ -39,7 +39,9 @@ logger.error("Something went wrong", request_id: "abc-123")
 ### Advanced Configuration
 
 ```ruby
-logger = Lumberjack::DataDog.setup do |config|
+# The output device and logger options can be passed in the setup method.
+# These are passed through to Lumberjack::Logger.new.
+logger = Lumberjack::DataDog.setup(log_device, level: :info) do |config|
   # Truncate messages longer than 1000 characters
   config.max_message_length = 1000
 
@@ -54,6 +56,10 @@ logger = Lumberjack::DataDog.setup do |config|
     user_id: "usr.id",
     request_id: "http.request_id"
   )
+
+  # Add a backtrace cleaner to remove unnecessary noise when logging exceptions.
+  # The cleaner object must respond to `clean` method.
+  config.backtrace_cleaner = Rails.backtrace_cleaner
 
   # Enable pretty JSON for development
   config.pretty = true

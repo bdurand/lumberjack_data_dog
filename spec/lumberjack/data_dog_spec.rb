@@ -6,6 +6,11 @@ RSpec.describe Lumberjack::DataDog do
   let(:stream) { StringIO.new }
   let(:last_entry) { JSON.parse(stream.string.split("\n").last) }
 
+  it "passes options through to Lumberjack::Logger" do
+    logger = Lumberjack::DataDog.setup(stream, level: :warn)
+    expect(logger.level).to eq(Logger::WARN)
+  end
+
   it "logs the time as timestamp" do
     logger = Lumberjack::DataDog.setup(stream)
     logger.info("Test message")
@@ -124,9 +129,29 @@ RSpec.describe Lumberjack::DataDog do
   end
 
   describe "exceptions" do
-    it "logs exceptions under the error tag"
+    it "logs exceptions under the error tag" do
+      logger = Lumberjack::DataDog.setup(stream)
+      begin
+        raise "Test exception"
+      rescue => e
+        logger.error("An error occurred", error: e)
+      end
+      expect(last_entry["error"]["kind"]).to eq("RuntimeError")
+      expect(last_entry["error"]["message"]).to eq("Test exception")
+      expect(last_entry["error"]["stack"]).to eq(e.backtrace)
+    end
 
-    it "formats exceptions in the tags in to kind, message, and stack subfields"
+    it "formats exceptions in the tags in to kind, message, and stack subfields" do
+      logger = Lumberjack::DataDog.setup(stream)
+      begin
+        raise "Test exception"
+      rescue => e
+        logger.error("An error occurred", exception: e)
+      end
+      expect(last_entry["exception"]["kind"]).to eq("RuntimeError")
+      expect(last_entry["exception"]["message"]).to eq("Test exception")
+      expect(last_entry["exception"]["stack"]).to eq(e.backtrace)
+    end
   end
 
   describe "message trunction" do
