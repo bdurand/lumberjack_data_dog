@@ -17,7 +17,7 @@ This gem provides a logging setup for using the [lumberjack](https://github.com/
 - **Duration Logging**: Automatic conversion of duration values to nanoseconds for DataDog
 - **Configurable Message Truncation**: Limit message length to prevent oversized logs
 - **Thread Information**: Optional thread name logging
-- **Tag Remapping**: Flexible tag transformation and remapping
+- **attribute Remapping**: Flexible attribute transformation and remapping
 - **Pretty JSON**: Optional pretty-printed JSON output for development
 
 ## Usage
@@ -51,8 +51,8 @@ logger = Lumberjack::DataDog.setup(log_device, level: :info) do |config|
   # Disable PID logging
   config.pid = false
 
-  # Remap custom tags to DataDog attributes
-  config.remap_tags(
+  # Remap custom attributes to DataDog attributes
+  config.remap_attributes(
     user_id: "usr.id",
     request_id: "http.request_id"
   )
@@ -70,10 +70,8 @@ end
 
 ```ruby
 # Log to a file instead of STDOUT
-File.open("/var/log/app.log", "a") do |file|
-  logger = Lumberjack::DataDog.setup(file)
-  logger.info("Logged to file")
-end
+logger = Lumberjack::DataDog.setup("/var/log/app.log")
+logger.info("Logged to file")
 ```
 
 ### Exception Logging
@@ -108,11 +106,11 @@ logger.info("API call", duration_micros: 1500)   # microseconds
 logger.info("Function", duration_ns: 1500000)    # nanoseconds
 ```
 
-### Custom Tag Transformation
+### Custom attribute Transformation
 
 ```ruby
 logger = Lumberjack::DataDog.setup do |config|
-  config.remap_tags(
+  config.remap_attributes(
     # Simple remapping
     correlation_id: "trace.correlation_id",
 
