@@ -4,6 +4,9 @@
 [![Ruby Style Guide](https://img.shields.io/badge/code_style-standard-brightgreen.svg)](https://github.com/testdouble/standard)
 [![Gem Version](https://badge.fury.io/rb/lumberjack_data_dog.svg)](https://badge.fury.io/rb/lumberjack_data_dog)
 
+> [!IMPORTANT]
+> This gem has been renamed to [`lumberjack_datadog`](https://github.com/bdurand/lumberjack_datadog). For new versions switch using that gem.
+
 This gem provides a logging setup for using the [lumberjack](https://github.com/bdurand/lumberjack) gem with DataDog. It sets up JSON logging and maps values to DataDog's [standard attributes](https://docs.datadoghq.com/logs/processing/attributes_naming_convention/).
 
 ## Features

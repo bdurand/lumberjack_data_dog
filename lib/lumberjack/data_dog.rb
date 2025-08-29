@@ -80,7 +80,7 @@ module Lumberjack::DataDog
     end
 
     def json_device(stream, config)
-      Lumberjack::JsonDevice.new(stream, mapping: json_mapping(config), pretty: config.pretty)
+      Lumberjack::JsonDevice.new(output: stream, mapping: json_mapping(config), pretty: config.pretty)
     end
 
     def json_mapping(config)
