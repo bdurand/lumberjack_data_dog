@@ -2,7 +2,40 @@
 
 require "lumberjack_json_device"
 
+# Datadog integration for Lumberjack logging.
+#
+# This module provides JSON logging functionality specifically designed for Datadog,
+# automatically mapping standard log attributes to Datadog's naming conventions
+# and providing structured exception and duration logging.
+#
+# @example Basic usage
+#   logger = Lumberjack::Logger.new(:datadog)
+#   logger.info("Application started")
+#
+# @example Advanced configuration
+#   logger = Lumberjack::Logger.new(:datadog,
+#     max_message_length: 1000,
+#     allow_all_attributes: false,
+#     attribute_mapping: { request_id: "trace_id" }
+#   )
+#
+# @see Device
+# @see Config
 module Lumberjack::DataDog
+  # Version of the lumberjack_datadog gem
+  # @return [String] The current version string
+  VERSION = ::File.read(::File.join(__dir__, "..", "..", "VERSION")).strip.freeze
+
+  # Standard mapping of log attributes to Datadog fields.
+  #
+  # This constant defines the default attribute mapping used to transform
+  # Lumberjack log entries into Datadog-compatible format.
+  #
+  # @return [Hash] Mapping hash with the following transformations:
+  #   - :time → "timestamp"
+  #   - :severity → "status"
+  #   - :progname → ["logger", "name"] (nested attribute)
+  #   - :pid → "pid"
   STANDARD_ATTRIBUTE_MAPPING = {
     time: "timestamp",
     severity: "status",
@@ -10,41 +43,94 @@ module Lumberjack::DataDog
     pid: "pid"
   }.freeze
 
-  class Config
-    attr_accessor :max_message_length
-    attr_accessor :backtrace_cleaner
-    attr_accessor :thread_name
-    attr_accessor :pid
-    attr_accessor :allow_all_attributes
-    attr_reader :attribute_mapping
-    attr_accessor :pretty
-
-    def initialize
-      @max_message_length = nil
-      @backtrace_cleaner = nil
-      @thread_name = false
-      @pid = true
-      @allow_all_attributes = true
-      @attribute_mapping = {}
-      @pretty = false
-    end
-
-    def remap_attributes(attribute_mapping)
-      @attribute_mapping = @attribute_mapping.merge(attribute_mapping)
-    end
-
-    def validate!
-      if !max_message_length.nil? && (!max_message_length.is_a?(Integer) || max_message_length <= 0)
-        raise ArgumentError, "max_message_length must be a positive integer"
-      end
-
-      unless backtrace_cleaner.nil? || backtrace_cleaner.respond_to?(:clean)
-        raise ArgumentError, "backtrace_cleaner must respond to #clean"
-      end
-    end
-  end
-
   class << self
+    # Returns a mapping of log attributes to JSON fields for Datadog.
+    #
+    # This method creates the attribute mapping configuration used by the JSON device
+    # to transform log entries into Datadog-compatible format.
+    #
+    # @param pid [Boolean, Symbol] Include process ID in logs. Options:
+    #   - true: Include current process ID (default)
+    #   - false: Exclude process ID
+    #   - :global: Use globally unique process ID
+    # @param attribute_mapping [Hash] Custom attribute name mapping. Keys are original
+    #   attribute names (symbols), values can be strings, arrays (for nested attributes),
+    #   or procs for custom formatting.
+    # @param allow_all_attributes [Boolean] Whether to include all log entry attributes
+    #   at the root level of JSON output. Default is true.
+    # @param max_message_length [Integer, nil] Maximum message length. Messages longer
+    #   than this will be truncated. Default is nil (no truncation).
+    # @return [Hash] Complete mapping configuration for the JSON device
+    def json_mapping(pid: true, attribute_mapping: {}, allow_all_attributes: true, max_message_length: nil)
+      mapping = STANDARD_ATTRIBUTE_MAPPING.dup
+
+      if pid == :global
+        mapping[:pid] = ->(pid) { {"pid" => Lumberjack::Utils.global_pid(pid)} }
+      else
+        mapping.delete(:pid) unless pid
+      end
+
+      mapping.merge!(attribute_mapping.transform_keys(&:to_sym))
+
+      mapping[:attributes] = "*" if allow_all_attributes
+
+      mapping[:message] = if max_message_length
+        truncate_message_transformer(max_message_length)
+      else
+        true
+      end
+
+      mapping.transform_keys!(&:to_s)
+    end
+
+    def entry_formatter(backtrace_cleaner: nil)
+      Lumberjack::EntryFormatter.build do |formatter|
+        formatter.format_class(Exception) do |error|
+          Lumberjack::MessageAttributes.new(error.inspect, error: error)
+        end
+
+        formatter.format_attributes(Exception, Lumberjack::DataDog::ExceptionAttributeFormatter.new(backtrace_cleaner: backtrace_cleaner))
+
+        formatter.format_attribute_name(:duration) do |seconds|
+          (seconds.to_f * 1_000_000_000).round
+        end
+
+        formatter.format_attribute_name(:duration_ms) do |millis|
+          nanoseconds = (millis.to_f * 1_000_000).round
+          Lumberjack::RemapAttribute.new("duration" => nanoseconds)
+        end
+
+        formatter.format_attribute_name(:duration_micros) do |micros|
+          nanoseconds = (micros.to_f * 1_000).round
+          Lumberjack::RemapAttribute.new("duration" => nanoseconds)
+        end
+
+        formatter.format_attribute_name(:duration_ns) do |ns|
+          Lumberjack::RemapAttribute.new("duration" => ns.to_i)
+        end
+      end
+    end
+
+    # Convenience method for setting up a Datadog logger with a block configuration.
+    #
+    # This method provides a block-based configuration approach that was more useful
+    # in earlier versions of Lumberjack. With Lumberjack 2+, you can achieve the same
+    # results more directly using {Lumberjack::Logger.new} with the :datadog device.
+    #
+    # @param stream [IO, String, Pathname] Output stream or path for log output.
+    #   Default is $stdout.
+    # @param options [Hash] Additional logger options passed to Lumberjack::Logger.new
+    # @yield [Lumberjack::DataDog::Config] Block for configuring the logger behavior
+    # @return [Lumberjack::Logger] Configured logger instance
+    #
+    # @example Block configuration
+    #   logger = Lumberjack::DataDog.setup($stdout, level: :info) do |config|
+    #     config.max_message_length = 500
+    #     config.pretty = true
+    #   end
+    #
+    # @see Config
+    # @see Device
     def setup(stream = $stdout, options = {}, &block)
       config = Config.new
       yield(config) if block_given?
@@ -55,15 +141,36 @@ module Lumberjack::DataDog
 
     private
 
+    # Creates a transformer lambda that truncates messages to a maximum length.
+    #
+    # @param max_length [Integer] Maximum message length
+    # @return [Proc] Message truncation transformer
+    def truncate_message_transformer(max_length)
+      lambda do |msg|
+        msg = msg.inspect unless msg.is_a?(String)
+        msg = "#{msg[0, max_length - 1]}…" if msg.length > max_length
+        {"message" => msg}
+      end
+    end
+
+    # Creates a new logger instance with the provided configuration.
+    #
+    # @param stream [IO, String, Pathname] Output stream or path
+    # @param options [Hash] Logger options to pass to Lumberjack::Logger.new
+    # @param config [Lumberjack::DataDog::Config] Configuration object with settings
+    # @return [Lumberjack::Logger] Configured logger instance
     def new_logger(stream, options, config)
-      logger = Lumberjack::Logger.new(json_device(stream, config), **options)
+      mapping = json_mapping(
+        pid: config.pid,
+        attribute_mapping: config.attribute_mapping,
+        allow_all_attributes: config.allow_all_attributes,
+        max_message_length: config.max_message_length
+      )
 
-      # Add the error to the error attribute if an exception is logged as the message.
-      logger.message_formatter.add(Exception, message_exception_formatter)
+      options = options.merge(output: stream, mapping: mapping, pretty: config.pretty)
+      logger = Lumberjack::Logger.new(:datadog, **options)
 
-      # Split the error attribute up into standard attributes if it is an exception.
-      logger.attribute_formatter.add(Exception, exception_attribute_formatter(config))
-
+      # Deprecated behavior
       if config.thread_name
         if config.thread_name == :global
           logger.tag!("logger.thread_name" => -> { Lumberjack::Utils.global_thread_id })
@@ -72,73 +179,11 @@ module Lumberjack::DataDog
         end
       end
 
-      if config.pid == :global
-        logger.tag!("pid" => -> { Lumberjack::Utils.global_pid })
-      end
-
       logger
-    end
-
-    def json_device(stream, config)
-      Lumberjack::JsonDevice.new(output: stream, mapping: json_mapping(config), pretty: config.pretty)
-    end
-
-    def json_mapping(config)
-      mapping = config.attribute_mapping.transform_keys(&:to_sym)
-      mapping = mapping.merge(STANDARD_ATTRIBUTE_MAPPING)
-
-      mapping.delete(:pid) if !config.pid || config.pid == :global
-
-      mapping[:attributes] = "*" if config.allow_all_attributes
-
-      mapping[:message] = if config.max_message_length
-        truncate_message_transformer(config.max_message_length)
-      else
-        "message"
-      end
-
-      mapping[:duration] = duration_nanosecond_transformer(1_000_000_000)
-      mapping[:duration_ms] = duration_nanosecond_transformer(1_000_000)
-      mapping[:duration_micros] = duration_nanosecond_transformer(1_000)
-      mapping[:duration_ns] = duration_nanosecond_transformer(1)
-
-      mapping.transform_keys!(&:to_s)
-    end
-
-    def truncate_message_transformer(max_length)
-      lambda do |msg|
-        msg = msg.inspect unless msg.is_a?(String)
-        msg = msg[0, max_length] if msg.is_a?(String) && msg.length > max_length
-        {"message" => msg}
-      end
-    end
-
-    def duration_nanosecond_transformer(multiplier)
-      lambda do |duration|
-        if duration.is_a?(Numeric)
-          {"duration" => (duration * multiplier).round}
-        else
-          {"duration" => nil}
-        end
-      end
-    end
-
-    def message_exception_formatter
-      lambda do |error|
-        Lumberjack::Formatter::TaggedMessage.new(error.inspect, error: error)
-      end
-    end
-
-    def exception_attribute_formatter(config)
-      lambda do |error|
-        error_attributes = {"kind" => error.class.name, "message" => error.message}
-        trace = error.backtrace
-        if trace
-          trace = config.backtrace_cleaner.clean(trace) if config.backtrace_cleaner
-          error_attributes["stack"] = trace
-        end
-        error_attributes
-      end
     end
   end
 end
+
+require_relative "data_dog/config"
+require_relative "data_dog/device"
+require_relative "data_dog/exception_attribute_formatter"
