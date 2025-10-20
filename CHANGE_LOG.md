@@ -8,7 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Support for Lumberjack 2.0.
 - Added `Lumberjack::DataDog::Device` as a wrapper for `Lumberjack::JsonDevice` with mapping to Datadog standard attributes.
 - Added `Lumberjack::DataDog::EntryFormatter` to encapsulate entry formatting logic for exceptions and duration. With Lumberjack 2 this can now be merged with other formatters.
 - Added `Lumberjack::DataDog::ExceptionAttributeFormatter` to handle exception attribute extraction and formatting. This formatter can now also handle adding additional attributes from other kinds of exceptions.
