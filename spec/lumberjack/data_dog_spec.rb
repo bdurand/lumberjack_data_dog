@@ -78,24 +78,24 @@ RSpec.describe Lumberjack::DataDog do
     end
   end
 
-  describe "tags" do
-    it "shows all tags by default" do
+  describe "attributes" do
+    it "shows all attributes by default" do
       logger = Lumberjack::DataDog.setup(stream)
       logger.info("Test message", test: "value")
       expect(last_entry["test"]).to eq("value")
     end
 
-    it "can remap tags" do
+    it "can remap attributes" do
       logger = Lumberjack::DataDog.setup(stream) do |config|
-        config.remap_tags(test: "foo")
+        config.remap_attributes(test: "foo")
       end
       logger.info("Test message", test: "value")
       expect(last_entry["foo"]).to eq("value")
     end
 
-    it "can remap tags with a formatter" do
+    it "can remap attributes with a formatter" do
       logger = Lumberjack::DataDog.setup(stream) do |config|
-        config.remap_tags(test: ->(value) { {"test" => "formatted_#{value}"} })
+        config.remap_attributes(test: ->(value) { {"test" => "formatted_#{value}"} })
       end
       logger.info("Test message", test: "value")
       expect(last_entry["test"]).to eq("formatted_value")
@@ -129,7 +129,7 @@ RSpec.describe Lumberjack::DataDog do
   end
 
   describe "exceptions" do
-    it "logs exceptions under the error tag" do
+    it "logs exceptions under the error attribute" do
       logger = Lumberjack::DataDog.setup(stream)
       begin
         raise "Test exception"
@@ -141,7 +141,7 @@ RSpec.describe Lumberjack::DataDog do
       expect(last_entry["error"]["stack"]).to eq(e.backtrace)
     end
 
-    it "formats exceptions in the tags in to kind, message, and stack subfields" do
+    it "formats exceptions in the attributes in to kind, message, and stack subfields" do
       logger = Lumberjack::DataDog.setup(stream)
       begin
         raise "Test exception"

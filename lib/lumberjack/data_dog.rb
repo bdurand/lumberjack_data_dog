@@ -15,8 +15,8 @@ module Lumberjack::DataDog
     attr_accessor :backtrace_cleaner
     attr_accessor :thread_name
     attr_accessor :pid
-    attr_accessor :allow_all_tags
-    attr_reader :tag_mapping
+    attr_accessor :allow_all_attributes
+    attr_reader :attribute_mapping
     attr_accessor :pretty
 
     def initialize
@@ -24,13 +24,13 @@ module Lumberjack::DataDog
       @backtrace_cleaner = nil
       @thread_name = false
       @pid = true
-      @allow_all_tags = true
-      @tag_mapping = {}
+      @allow_all_attributes = true
+      @attribute_mapping = {}
       @pretty = false
     end
 
-    def remap_tags(tag_mapping)
-      @tag_mapping = @tag_mapping.merge(tag_mapping)
+    def remap_attributes(attribute_mapping)
+      @attribute_mapping = @attribute_mapping.merge(attribute_mapping)
     end
 
     def validate!
@@ -56,40 +56,40 @@ module Lumberjack::DataDog
     private
 
     def new_logger(stream, options, config)
-      logger = Lumberjack::Logger.new(json_device(stream, config), options)
+      logger = Lumberjack::Logger.new(json_device(stream, config), **options)
 
-      # Add the error to the error tag if an exception is logged as the message.
+      # Add the error to the error attribute if an exception is logged as the message.
       logger.message_formatter.add(Exception, message_exception_formatter)
 
-      # Split the error tag up into standard attributes if it is an exception.
-      logger.tag_formatter.add(Exception, exception_tag_formatter(config))
+      # Split the error attribute up into standard attributes if it is an exception.
+      logger.attribute_formatter.add(Exception, exception_attribute_formatter(config))
 
       if config.thread_name
         if config.thread_name == :global
-          logger.tag_globally("logger.thread_name" => -> { Lumberjack::Utils.global_thread_id })
+          logger.tag!("logger.thread_name" => -> { Lumberjack::Utils.global_thread_id })
         else
-          logger.tag_globally("logger.thread_name" => -> { Lumberjack::Utils.thread_name })
+          logger.tag!("logger.thread_name" => -> { Lumberjack::Utils.thread_name })
         end
       end
 
       if config.pid == :global
-        logger.tag_globally("pid" => -> { Lumberjack::Utils.global_pid })
+        logger.tag!("pid" => -> { Lumberjack::Utils.global_pid })
       end
 
       logger
     end
 
     def json_device(stream, config)
-      Lumberjack::JsonDevice.new(stream, mapping: json_mapping(config), pretty: config.pretty)
+      Lumberjack::JsonDevice.new(output: stream, mapping: json_mapping(config), pretty: config.pretty)
     end
 
     def json_mapping(config)
-      mapping = config.tag_mapping.transform_keys(&:to_sym)
+      mapping = config.attribute_mapping.transform_keys(&:to_sym)
       mapping = mapping.merge(STANDARD_ATTRIBUTE_MAPPING)
 
       mapping.delete(:pid) if !config.pid || config.pid == :global
 
-      mapping[:tags] = "*" if config.allow_all_tags
+      mapping[:attributes] = "*" if config.allow_all_attributes
 
       mapping[:message] = if config.max_message_length
         truncate_message_transformer(config.max_message_length)
@@ -129,15 +129,15 @@ module Lumberjack::DataDog
       end
     end
 
-    def exception_tag_formatter(config)
+    def exception_attribute_formatter(config)
       lambda do |error|
-        error_tags = {"kind" => error.class.name, "message" => error.message}
+        error_attributes = {"kind" => error.class.name, "message" => error.message}
         trace = error.backtrace
         if trace
           trace = config.backtrace_cleaner.clean(trace) if config.backtrace_cleaner
-          error_tags["stack"] = trace
+          error_attributes["stack"] = trace
         end
-        error_tags
+        error_attributes
       end
     end
   end
